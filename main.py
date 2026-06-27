@@ -34,5 +34,5 @@ if __name__ == "__main__":
     if auto_open and "--no-open" not in sys.argv:
         threading.Thread(target=open_browser, args=(port,), daemon=True).start()
 
-    print(f"[job_tracker] running at http://localhost:{port}")
+    print(f"[karrierescout] running at http://localhost:{port}")
     app.run(port=port, debug=False)

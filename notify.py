@@ -1,5 +1,5 @@
 """
-Notification senders for the Job Finder app.
+Notification senders for the KarriereScout app.
 Currently supports ntfy.sh push notifications.
 """
 

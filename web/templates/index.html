@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Tracker</title>
+<title>KarriereScout</title>
 <script>
   // Apply saved theme before paint to avoid a flash of the wrong theme.
   (function () {
@@ -380,6 +380,30 @@
   .job-description-wrap.expanded { display: block; }
   .job-description-full { font-size: 13px; color: var(--text-mid); line-height: 1.6; white-space: pre-wrap; margin-top: 8px; }
 
+  /* ── notes & applied date ─────────────────────────────────── */
+  .notes-toggle { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 6px; transition: color 0.15s; }
+  .notes-toggle:hover { color: var(--text-mid); }
+  .notes-toggle.has-notes { color: var(--accent); }
+  .notes-wrap { display: none; }
+  .notes-wrap.expanded { display: block; margin-top: 8px; }
+  .notes-textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    padding: 9px 11px;
+    border-radius: 4px;
+    resize: vertical;
+    min-height: 60px;
+    line-height: 1.5;
+  }
+  .notes-textarea:focus { outline: none; border-color: var(--border-hover); }
+  .notes-saved { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--green); margin-left: 8px; opacity: 0; transition: opacity 0.2s; }
+  .notes-saved.show { opacity: 1; }
+  .applied-at { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--green); white-space: nowrap; }
+
   /* ── ATS ──────────────────────────────────────────────────── */
   .ats-badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid; white-space: nowrap; }
   .ats-badge.ats-good { color: #6ee7a0; border-color: rgba(110,231,160,0.35); background: rgba(110,231,160,0.1); }
@@ -691,7 +715,7 @@
 <body>
 
 <header>
-  <div class="logo">job_tracker</div>
+  <div class="logo">KarriereScout</div>
   <div class="header-right">
     <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">
       <span class="theme-ico theme-ico-sun">☀</span>
@@ -828,6 +852,7 @@ let allSources = [];
 let notifExpanded = false;
 let expandedDescriptions = new Set();
 let expandedAts = new Set();
+let expandedNotes = new Set();
 
 // ── ATS ─────────────────────────────────────────────────────────
 function atsScoreClass(score) {
@@ -1019,6 +1044,20 @@ function formatFoundAt(s) {
   const d = new Date(s.replace(' ', 'T') + 'Z');
   if (isNaN(d.getTime())) return s;
   return d.toLocaleString();
+}
+
+function formatAppliedAt(s) {
+  if (!s) return '';
+  // Stored as UTC by SQLite's datetime('now') — append "Z" so it's parsed as
+  // UTC. Show date only (the day you applied is what matters for follow-ups).
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleDateString();
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function formatDuration(sec) {
@@ -1282,6 +1321,13 @@ function renderNotifs(logs, lastRun, lastRunDurationSec) {
 // ── job cards ─────────────────────────────────────────────────────
 function renderJobs(jobs) {
   const list = document.getElementById('jobList');
+  // Preserve an in-progress note edit across re-renders (loadJobs polls every
+  // 5s during a scan) so a periodic refresh doesn't wipe what's being typed.
+  const active = document.activeElement;
+  let editing = null;
+  if (active && active.classList && active.classList.contains('notes-textarea')) {
+    editing = { id: active.id, value: active.value, start: active.selectionStart, end: active.selectionEnd };
+  }
   const filtered = currentTypeFilter === 'all' ? jobs : jobs.filter(job => getTypeTags(job.title).includes(currentTypeFilter));
   currentJobs = filtered;
   if (!filtered.length) {
@@ -1318,6 +1364,7 @@ function renderJobs(jobs) {
       </div>
       ${descBlock}
       ${renderAtsPanel(job)}
+      ${renderNotes(job)}
       <div class="card-actions">
         <div class="action-buttons">
           <button class="btn btn-icon btn-applying ${job.status === 'applying' ? 'active' : ''}" onclick="setStatus(${job.id}, 'applying')" title="Applying">⏳</button>
@@ -1327,11 +1374,21 @@ function renderJobs(jobs) {
           <a href="${job.url}" target="_blank" rel="noopener" class="btn btn-icon btn-open" title="Open">↗</a>
         </div>
         <div class="card-right">
+          ${job.applied_at ? `<span class="applied-at" title="Date you marked this as applied">✓ applied ${formatAppliedAt(job.applied_at)}</span>` : ''}
           <span class="found-at">${formatFoundAt(job.date_found)}</span>
         </div>
       </div>
     </div>`;
   }).join('');
+
+  if (editing) {
+    const ta = document.getElementById(editing.id);
+    if (ta) {
+      ta.value = editing.value;
+      ta.focus();
+      try { ta.setSelectionRange(editing.start, editing.end); } catch (e) {}
+    }
+  }
 }
 
 function toggleDescription(id) {
@@ -1343,6 +1400,62 @@ function toggleDescription(id) {
   arrow.textContent = expanded ? '▾' : '▸';
   label.textContent = expanded ? 'Hide description' : 'Show description';
   if (expanded) expandedDescriptions.add(id); else expandedDescriptions.delete(id);
+}
+
+// ── notes ─────────────────────────────────────────────────────────
+function renderNotes(job) {
+  const isExpanded = expandedNotes.has(job.id);
+  const hasNotes = !!(job.notes && job.notes.trim());
+  const label = hasNotes ? 'Notes' : 'Add note';
+  return `<div class="notes-toggle ${hasNotes ? 'has-notes' : ''}" onclick="toggleNotes(${job.id})">
+       <span id="notes-arrow-${job.id}">${isExpanded ? '▾' : '▸'}</span>
+       <span id="notes-label-${job.id}">${hasNotes ? '📝 ' : ''}${label}</span>
+       <span class="notes-saved" id="notes-saved-${job.id}">saved ✓</span>
+     </div>
+     <div class="notes-wrap ${isExpanded ? 'expanded' : ''}" id="notes-wrap-${job.id}">
+       <textarea class="notes-textarea" id="notes-text-${job.id}"
+         placeholder="Add a note — contact person, follow-up date, status…"
+         onblur="saveNotes(${job.id}, this)">${escapeHtml(job.notes)}</textarea>
+     </div>`;
+}
+
+function toggleNotes(id) {
+  const wrap = document.getElementById('notes-wrap-' + id);
+  const arrow = document.getElementById('notes-arrow-' + id);
+  if (!wrap) return;
+  const expanded = wrap.classList.toggle('expanded');
+  arrow.textContent = expanded ? '▾' : '▸';
+  if (expanded) {
+    expandedNotes.add(id);
+    const ta = document.getElementById('notes-text-' + id);
+    if (ta) ta.focus();
+  } else {
+    expandedNotes.delete(id);
+  }
+}
+
+async function saveNotes(id, el) {
+  const notes = el.value;
+  const job = (allJobs.find(j => j.id === id) || currentJobs.find(j => j.id === id));
+  // Skip the round-trip if nothing changed since the card was rendered.
+  if (job && (job.notes || '') === notes) return;
+  try {
+    await fetch('/api/notes', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ id, notes })
+    });
+    if (job) job.notes = notes;  // keep local copy in sync so re-renders don't clobber it
+    const saved = document.getElementById('notes-saved-' + id);
+    const labelEl = document.getElementById('notes-label-' + id);
+    const toggleEl = labelEl ? labelEl.closest('.notes-toggle') : null;
+    if (labelEl) labelEl.textContent = notes.trim() ? '📝 Notes' : 'Add note';
+    if (toggleEl) toggleEl.classList.toggle('has-notes', !!notes.trim());
+    if (saved) {
+      saved.classList.add('show');
+      setTimeout(() => saved.classList.remove('show'), 1500);
+    }
+  } catch (e) { console.error('Failed to save note', e); }
 }
 
 async function copyJob(id, btn) {

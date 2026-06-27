@@ -33,7 +33,8 @@ def init_db():
         # Older DBs won't have these columns yet — SQLite has no
         # `ADD COLUMN IF NOT EXISTS`, so just try and ignore the duplicate-
         # column error if they're already there.
-        for col_def in ("ats_score INTEGER", "ats_report TEXT"):
+        for col_def in ("ats_score INTEGER", "ats_report TEXT",
+                        "applied_at TEXT", "notes TEXT"):
             try:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
@@ -137,6 +138,23 @@ def get_jobs(status=None):
 def set_status(job_id, status):
     with get_conn() as conn:
         conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
+        # Stamp the application date the first time a job is marked "applied".
+        # COALESCE keeps an existing date intact, so toggling applied off and
+        # on again (or later moving it to ignored) preserves the original
+        # date you actually applied rather than overwriting it.
+        if status == "applied":
+            conn.execute(
+                "UPDATE jobs SET applied_at = COALESCE(applied_at, datetime('now')) WHERE id = ?",
+                (job_id,)
+            )
+        conn.commit()
+
+
+def set_notes(job_id, notes):
+    """Store free-text notes for a job (e.g. contact name, follow-up date,
+    'no response after 2 weeks'). An empty string clears the note."""
+    with get_conn() as conn:
+        conn.execute("UPDATE jobs SET notes = ? WHERE id = ?", (notes, job_id))
         conn.commit()
 
 

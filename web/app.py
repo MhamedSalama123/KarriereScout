@@ -12,6 +12,7 @@ from db import (get_jobs, set_status, bulk_set_status, delete_job, log_run,
                 delete_jobs_without_description)
 from db.database import (
     set_ats_result, add_resume, get_resumes, delete_resume, get_combined_resume_text,
+    set_notes,
 )
 from scraper import SCRAPERS
 from filters import passes_title_filter, passes_description_filter
@@ -312,6 +313,16 @@ def api_set_status():
     if not job_id or status not in ("new", "applying", "applied", "ignored"):
         return jsonify({"error": "invalid"}), 400
     set_status(job_id, status)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/notes", methods=["POST"])
+def api_set_notes():
+    data = request.json or {}
+    job_id = data.get("id")
+    if not job_id:
+        return jsonify({"error": "invalid"}), 400
+    set_notes(job_id, (data.get("notes") or "").strip())
     return jsonify({"ok": True})
 
 
